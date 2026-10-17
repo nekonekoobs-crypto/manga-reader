@@ -1,0 +1,17 @@
+{
+  "appId": "com.nekoobs.mangareader",
+  "appName": "Manga Reader",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}
