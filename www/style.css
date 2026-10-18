@@ -143,3 +143,11 @@ h1,h2,h3{margin:0}
   background:#2b2b36;color:var(--tx);padding:10px 16px;border-radius:12px;font-size:14px;max-width:88%;
   opacity:0;pointer-events:none;transition:.25s;text-align:center}
 #toast.show{opacity:1;transform:translate(-50%,0)}
+
+.diag{white-space:pre-wrap;word-break:break-all;background:var(--sf);border:1px solid var(--ln);
+  border-radius:12px;padding:12px;margin:10px 0 0;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;color:#cfcfd8}
+.diag[hidden]{display:none}
+
+#fatal{position:fixed;top:0;left:0;right:0;z-index:200;background:#b3261e;color:#fff;font-size:13px;
+  padding:calc(var(--st) + 8px) 14px 10px;word-break:break-word}
+#fatal[hidden]{display:none}
