@@ -203,8 +203,265 @@
       }
     };
   }
+
+  /* ---------------- Fuentes preconfiguradas ----------------
+     Cada una declara `hosts` (para reconocer enlaces pegados) y `classify(url)` -> 'series' | 'chapter' | null. */
+  const origin = b => b.replace(/\/+$/, '');
+  const nativeRef = base => ({ Referer: origin(base) + '/', Origin: origin(base) });
+  const textOf = (doc, sels) => { for (const s of sels) { const e = doc.querySelector(s); const t = e && P.clean(e.textContent); if (t) return t; } return ''; };
+  const metaOf = (doc, n) => { const m = doc.querySelector(`meta[property="${n}"],meta[name="${n}"]`); return m ? P.clean(m.getAttribute('content')) : ''; };
+
+  // Sitios WordPress con el tema Madara (muy común en manga/manhwa): búsqueda, capítulos por AJAX e imágenes con lazy-load
+  function madara(cfg) {
+    const base = origin(cfg.base);
+    const withList = u => (/[?&]style=/.test(u) ? u : u + (u.includes('?') ? '&' : '?') + 'style=list');
+    return {
+      id: cfg.id, name: cfg.name, builtin: true, adult: !!cfg.adult, cfg: { sel: {} },
+      sub: base.replace(/^https?:\/\//, '') + ' · sitio WordPress (Madara)',
+      hosts: [base.replace(/^https?:\/\//, '').replace(/^www\./, '')],
+      imgHeaders: nativeRef(base),
+      classify(u) {
+        const p = u.pathname;
+        if (/^\/(manga|series|webtoon|comic)\/[^/]+\/?$/i.test(p)) return 'series';
+        if (/^\/(manga|series|webtoon|comic)\/[^/]+\/[^/]+/i.test(p) || P.looksLikeChapterUrl(u.href)) return 'chapter';
+        return null;
+      },
+      async search(q, page) {
+        const url = q
+          ? `${base}/${page ? 'page/' + (page + 1) + '/' : ''}?s=${encodeURIComponent(q)}&post_type=wp-manga`
+          : `${base}/manga/${page ? 'page/' + (page + 1) + '/' : ''}?m_orderby=latest`;
+        const doc = await getDoc(url);
+        const nodes = [...doc.querySelectorAll('.c-tabs-item__content, .page-item-detail, .manga-item, .popular-item-wrap')];
+        const seen = new Set(), items = [];
+        for (const n of nodes) {
+          const a = n.querySelector('.post-title a, h3 a, h4 a, h5 a, a[href*="/manga/"], a[href]');
+          if (!a) continue;
+          const id = P.abs(a.getAttribute('href'), url);
+          if (!id || seen.has(id)) continue;
+          seen.add(id);
+          items.push({ src: cfg.id, id, title: P.clean(a.getAttribute('title') || a.textContent) || id, cover: P.imgSrc(n.querySelector('img'), url) });
+        }
+        return { items, more: items.length >= 10 };
+      },
+      async detail(item) {
+        const doc = await getDoc(item.id);
+        const title = textOf(doc, ['.post-title h1', '.post-title h3', 'h1']).replace(/^(HOT|NEW)\s+/i, '') || item.title;
+        const cover = P.imgSrc(doc.querySelector('.summary_image img, .tab-summary img'), item.id) || P.abs(metaOf(doc, 'og:image'), item.id) || item.cover;
+        const desc = textOf(doc, ['.summary__content', '.description-summary', '.manga-excerpt']) || metaOf(doc, 'og:description');
+        const tags = [...doc.querySelectorAll('.genres-content a')].map(a => P.clean(a.textContent)).filter(Boolean);
+        let chapters = P.parseChapters(doc, item.id, { chapter: 'li.wp-manga-chapter a' });
+        if (!chapters.length) {
+          // Muchos sitios Madara cargan la lista de capítulos con una petición AJAX al abrir la serie
+          const root = item.id.split(/[?#]/)[0].replace(/\/?$/, '/');
+          const attempts = [() => fetch(root + 'ajax/chapters/', { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' } })];
+          const mid = (doc.__html.match(/manga_id["']?\s*[:=]\s*["']?(\d+)/) || doc.querySelector('[data-post]') && [0, doc.querySelector('[data-post]').getAttribute('data-post')] || [])[1];
+          if (mid) attempts.push(() => fetch(base + '/wp-admin/admin-ajax.php', { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'action=manga_get_chapters&manga=' + mid }));
+          for (const go of attempts) {
+            try {
+              const r = await go();
+              if (!r.ok) continue;
+              const frag = new DOMParser().parseFromString(await r.text(), 'text/html');
+              chapters = P.parseChapters(frag, item.id, { chapter: 'li.wp-manga-chapter a, .wp-manga-chapter a' });
+              if (chapters.length) break;
+            } catch (e) { /* probar el siguiente */ }
+          }
+        }
+        chapters.forEach(c => { c.id = withList(c.id); });
+        return { title, cover, desc, tags, chapters };
+      },
+      async pages(ch) {
+        const doc = await getDoc(withList(ch.id));
+        const urls = P.readerImages(doc, ch.id, { image: '.reading-content img, .page-break img' });
+        return urls.length ? urls : P.readerImages(doc, ch.id, {});
+      }
+    };
+  }
+
+  // m440.in (lector con búsqueda JSON, series en /manga/{slug} y capítulos en /manga/{slug}/{n}-{id})
+  const M4 = 'https://m440.in';
+  const m440 = {
+    id: 'm440', name: 'M440', builtin: true, cfg: { sel: {} },
+    sub: 'm440.in · puede pedir verificación de Cloudflare',
+    hosts: ['m440.in'], imgHeaders: nativeRef(M4),
+    classify(u) {
+      const seg = u.pathname.split('/').filter(Boolean);
+      if (seg[0] !== 'manga') return null;
+      return seg.length === 2 ? 'series' : seg.length >= 3 ? 'chapter' : null;
+    },
+    async search(q, page) {
+      if (q) {
+        if (page) return { items: [], more: false };
+        const j = await http(`${M4}/search?query=${encodeURIComponent(q)}`, 'json', { 'X-Requested-With': 'XMLHttpRequest' });
+        const items = (j.suggestions || []).filter(x => x.data).map(x => ({
+          src: 'm440', id: `${M4}/manga/${x.data}`, title: x.value, cover: `${M4}/uploads/manga/${x.data}/cover/cover_250x350.jpg`
+        }));
+        return { items, more: false };
+      }
+      const url = `${M4}/filterList?page=${page + 1}&sortBy=last_release&asc=false`;
+      const doc = await getDoc(url);
+      const items = P.parseList(doc, url, {}).filter(it => /\/manga\/[^/]+\/?$/.test(it.url))
+        .map(it => ({ src: 'm440', id: it.url, title: it.title, cover: it.cover }));
+      return { items, more: items.length >= 10 };
+    },
+    async detail(item) {
+      const doc = await getDoc(item.id);
+      const slug = item.id.split(/[?#]/)[0].replace(/\/$/, '').split('/').pop();
+      const title = textOf(doc, ['h2.widget-title', 'h1', '.widget-title']) || item.title;
+      const desc = textOf(doc, ['.well p', '.manga .well', '.summary']) || metaOf(doc, 'og:description');
+      const tags = [...doc.querySelectorAll('.dl-horizontal a[href*="/filterList"], .tag-links a')].map(a => P.clean(a.textContent)).filter(Boolean);
+      let chapters = P.parseChapters(doc, item.id, { chapter: 'ul.chapters li a, .chapters a' });
+      if (!chapters.length) chapters = P.parseChapters(doc, item.id, {}).filter(c => c.id.includes('/manga/' + slug + '/'));
+      return { title, cover: `${M4}/uploads/manga/${slug}/cover/cover_250x350.jpg`, desc, tags, chapters };
+    },
+    async pages(ch) {
+      const doc = await getDoc(ch.id);
+      let urls = P.readerImages(doc, ch.id, { image: '#all img, .viewer-cnt img' });
+      if (urls.length < 2) urls = P.readerImages(doc, ch.id, {});
+      return urls;
+    }
+  };
+
+  // LeerManhwas: series en /manhwa/{slug}/ y capítulos en /manhwa/{slug}/capitulo-{n}/ (imágenes en cdn01.leermanhwas.com)
+  const LM = 'https://leermanhwas.com';
+  const leermanhwas = Object.assign(generic({
+    id: 'leermanhwas', name: 'LeerManhwas', builtin: true,
+    searchUrl: LM + '/buscar?q={q}', sel: { chapter: 'a[href*="/capitulo-"]' }
+  }), {
+    sub: 'leermanhwas.com · la búsqueda no está verificada; pegar enlaces sí funciona',
+    hosts: ['leermanhwas.com'], imgHeaders: nativeRef(LM),
+    classify(u) {
+      if (/^\/manhwa\/[^/]+\/capitulo-/i.test(u.pathname)) return 'chapter';
+      if (/^\/manhwa\/[^/]+\/?$/i.test(u.pathname)) return 'series';
+      return null;
+    }
+  });
+  {
+    const g = leermanhwas.search;
+    leermanhwas.search = async (q, page) => {
+      if (!q) { // sin texto: lo último publicado en la portada
+        const doc = await getDoc(LM + '/');
+        const items = P.parseList(doc, LM + '/', {}).filter(it => /\/manhwa\/[^/]+\/?$/.test(it.url)).map(it => ({ src: 'leermanhwas', id: it.url, title: it.title, cover: it.cover }));
+        return { items, more: false };
+      }
+      return g(q, page);
+    };
+  }
+
+  // ZeroComics (API propia). Los nombres de campos se buscan con tolerancia porque no se pudo ver la respuesta real.
+  const ZA = 'https://api.zerocomics.net/api';
+  const ZC = 'https://cdn.zerocomics.net/';
+  const first = (o, keys) => { for (const k of keys) { if (o && o[k] != null && o[k] !== '') return o[k]; } return ''; };
+  const unwrap = j => (j && (j.data || j.serie || j.series || j.capitulo || j.result)) || j;
+  const zUrl = u => (typeof u === 'string' ? u : first(u, ['url', 'src', 'imagen', 'image', 'path', 'link']));
+  const zAbs = u => { u = zUrl(u); return u ? (/^https?:\/\//i.test(u) ? u : ZC + String(u).replace(/^\/+/, '')) : ''; };
+  const zItem = o => {
+    const slug = first(o, ['slug', 'id']);
+    return { src: 'zerocomics', id: String(slug), title: String(first(o, ['titulo', 'title', 'nombre', 'name']) || slug), cover: zAbs(first(o, ['portada', 'cover', 'imagen', 'image', 'thumbnail', 'poster'])) };
+  };
+  const zerocomics = {
+    id: 'zerocomics', name: 'ZeroComics', builtin: true, cfg: { sel: {} },
+    sub: 'api.zerocomics.net · adaptación sin verificar; pega enlaces de series',
+    hosts: ['zerocomics.net', 'loscomics.lat'],
+    classify(u) { const seg = u.pathname.split('/').filter(Boolean); return seg.length ? 'series' : null; },
+    seriesId: u => decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() || ''),
+    async search(q, page) {
+      const j = unwrap(await http(`${ZA}/series?${q ? 'search=' + encodeURIComponent(q) + '&' : ''}page=${page + 1}`, 'json'));
+      const arr = Array.isArray(j) ? j : (j.items || j.series || j.results || j.data || []);
+      return { items: arr.map(zItem).filter(i => i.id), more: arr.length >= 12 };
+    },
+    async detail(item) {
+      const j = unwrap(await http(`${ZA}/series/${encodeURIComponent(item.id)}/view`, 'json'));
+      const it = zItem(j);
+      const raw = first(j, ['capitulos', 'chapters', 'episodios']) || [];
+      const chapters = raw.map(c => {
+        const num = first(c, ['numero', 'number', 'capitulo', 'chapter', 'num']);
+        return { id: String(first(c, ['id', '_id'])), num: parseFloat(num), title: String(first(c, ['titulo', 'title', 'nombre']) || (num !== '' ? 'Cap. ' + num : 'Capítulo')) };
+      }).filter(c => c.id);
+      if (chapters.length > 1 && chapters[0].num < chapters[chapters.length - 1].num) chapters.reverse();
+      const tags = (first(j, ['generos', 'genres', 'tags', 'categorias']) || []).map(t => (typeof t === 'string' ? t : first(t, ['nombre', 'name', 'titulo']))).filter(Boolean);
+      return { title: it.title, cover: it.cover || item.cover, desc: String(first(j, ['descripcion', 'sinopsis', 'description', 'resumen'])).replace(/<[^>]*>/g, '').trim(), tags, status: first(j, ['estado', 'status']), chapters };
+    },
+    async pages(ch) {
+      const j = unwrap(await http(`${ZA}/capitulos/${encodeURIComponent(ch.id)}/view`, 'json'));
+      const arr = first(j, ['paginas', 'imagenes', 'images', 'pages', 'imgs']) || [];
+      return arr.map(zAbs).filter(Boolean);
+    }
+  };
+
+
+  // TMOHentai: el listado viene como HTML (a veces dentro de {"html": ...}); cada obra se identifica por su número.
+  // Oculta y no abre obras cuyo título o etiquetas apunten a menores de edad.
+  const TH = 'https://tmohentai.app';
+  const MINOR_RE = /\b(lol[ií]|lolic[oó]n|loli|shota|shotacon|shotac[oó]n|ni[ñn]a|ni[ñn]o|child|kid|underage|menor(es)?\s+de\s+edad)\b/i;
+  const thId = u => (String(u).match(/\/(?:library\/[^/]+|manga|view_uploads)\/(\d+)/) || [])[1] || '';
+  const tmohentai = {
+    id: 'tmohentai', name: 'TMOHentai (+18)', builtin: true, adult: true, cfg: { sel: {} },
+    sub: 'tmohentai.app · listado, detalle y lector probados con HTML real',
+    hosts: ['tmohentai.app'], imgHeaders: nativeRef(TH),
+    classify(u) {
+      if (/^\/library\/[^/]+\/\d+/.test(u.pathname)) return 'series';
+      if (/^\/(manga|view_uploads)\/\d+/.test(u.pathname)) return 'chapter';
+      return null;
+    },
+    async search(q, page) {
+      const url = `${TH}/?title=${encodeURIComponent(q || '')}&_=${Date.now()}&page=${page + 1}`;
+      const r = await fetch(url, { headers: { Accept: 'application/json, text/html, */*', 'X-Requested-With': 'XMLHttpRequest' } });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      let body = await r.text();
+      try { const j = JSON.parse(body); if (j && j.html) body = j.html; } catch (e) { /* ya era HTML */ }
+      const doc = new DOMParser().parseFromString(body, 'text/html');
+      const total = parseInt(((doc.querySelector('[data-total]') || {}).dataset || {}).total, 10);
+      const items = [];
+      for (const a of doc.querySelectorAll('a.manga-card')) {
+        const title = P.clean((a.querySelector('.manga-card__title') || {}).textContent || a.getAttribute('title'));
+        if (MINOR_RE.test(title)) continue;
+        const pg = parseInt(P.clean(((a.querySelector('.manga-card__stat--chapters span:last-child') || {}).textContent) || ''), 10);
+        items.push({ src: 'tmohentai', id: P.abs(a.getAttribute('href'), TH), title, cover: P.imgSrc(a.querySelector('img.manga-card__cover, img'), TH), n: pg || 0 });
+      }
+      return { items, more: isNaN(total) ? items.length >= 20 : (page + 1) * 24 < total };
+    },
+    async detail(item) {
+      const num = thId(item.id);
+      const doc = await getDoc(item.id);
+      const tags = [...new Set([...doc.querySelectorAll('a[href*="/tag/"]')].map(a => P.clean(a.textContent)).filter(t => t && t.length < 40))].slice(0, 12);
+      const title = textOf(doc, ['#md-title', 'h1']) || item.title;
+      if (MINOR_RE.test(title) || tags.some(t => MINOR_RE.test(t))) throw new Error('Contenido bloqueado por la app.');
+      const desc = (metaOf(doc, 'og:description') || metaOf(doc, 'description')).replace(/^Lee .*? en línea gratis\.\s*/i, '');
+      const cover = P.imgSrc(doc.querySelector('#md-cover'), TH) || item.cover || `https://storage.tmohentai.app/mangas/${num}/1.webp`;
+      const total = parseInt(((doc.querySelector('#md-preview-grid') || {}).dataset || {}).total, 10) || parseInt(item.n, 10) || 0;
+      // Cada obra se lee como un solo capítulo (/view_uploads/{id}); data-total es su número de páginas
+      return { title, cover, desc, tags, status: /ongoing/i.test(doc.body.textContent) ? 'ongoing' : '', chapters: [{ id: `${TH}/view_uploads/${num}`, title: 'Leer' + (total ? ` (${total} páginas)` : ''), num: total }] };
+    },
+    async pages(ch) {
+      const num = thId(ch.id);
+      const rx = new RegExp(`https?:\\\\?/\\\\?/storage\\.tmohentai\\.app\\\\?/mangas\\\\?/${num}\\\\?/[^"'\\s<>\\\\)]+?\\.(?:webp|jpe?g|png)`, 'gi');
+      const pn = u => { const m = u.match(/\/(\d+)\.\w+$/); return m ? parseInt(m[1], 10) : 0; };
+      const norm = t => [...new Set((t.match(rx) || []).map(u => u.replace(/\\\//g, '/')))].sort((a, b) => pn(a) - pn(b));
+      let urls = [];
+      try { urls = norm(await http(ch.id, 'text')); } catch (e) { /* probar el siguiente método */ }
+      if (urls.length < 2) {
+        try {
+          const all = [];
+          for (let off = 0; off < 600; off += 100) {
+            const t = await http(`${TH}/api/manga/${num}/preview-pages?offset=${off}&limit=100`, 'text');
+            const got = norm(t).filter(u => !all.includes(u));
+            if (!got.length) break;
+            all.push(...got);
+          }
+          if (all.length > urls.length) urls = all;
+        } catch (e) { /* sin API */ }
+      }
+      if (urls.length < 2 && ch.num > 1) urls = Array.from({ length: ch.num }, (_, i) => `https://storage.tmohentai.app/mangas/${num}/${i + 1}.webp`);
+      return urls;
+    }
+  };
+
+  const madaraNose = madara({ id: 'mangasnosekai', name: 'Mangas No Sekai', base: 'https://mangasnosekai.com' });
+  const madaraBoku = madara({ id: 'bokugents', name: 'Bokugents (+18)', base: 'https://bokugents.com', adult: true });
+
   const webSource = generic({ id: 'web', name: 'Cualquier web (pegar enlace)', builtin: true });
-  const allSources = () => [manhwaweb, mangadex, webSource, ...S.sources.map(generic)];
+  const PRESETS = [zerocomics, m440, leermanhwas, madaraNose, madaraBoku, tmohentai];
+  const allSources = () => [manhwaweb, mangadex, ...PRESETS, webSource, ...S.sources.map(generic)];
   const srcById = id => allSources().find(s => s.id === id) || manhwaweb;
 
   /* ---------------- Imágenes con red nativa ----------------
@@ -307,6 +564,10 @@
       $('#results').innerHTML = '<div class="empty">Pega arriba el enlace de una serie o de un capítulo de cualquier web y la app lo adapta al lector.</div>';
       return;
     }
+    if (src.adult && !S.set.adult) {
+      $('#results').innerHTML = '<div class="empty">Esta fuente es para mayores de 18 años. Actívala en Fuentes → Ajustes → «Mostrar contenido para adultos».</div>';
+      return;
+    }
     const my = ++SR.token;
     SR.busy = true;
     try {
@@ -350,7 +611,15 @@
     let u;
     try { u = new URL(url); } catch (e) { toast('Enlace no válido'); return; }
     if (/(^|\.)manhwaweb\.com$/i.test(u.hostname)) { openManhwaweb(u).catch(e => toast('Error: ' + (e.message || e))); return; }
-    const src = (S.current === 'mangadex' || S.current === 'manhwaweb') ? webSource : srcById(S.current);
+    const known = PRESETS.find(p => p.hosts.some(h => u.hostname.replace(/^www\./, '') === h || u.hostname.endsWith('.' + h)));
+    if (known) {
+      if (known.adult && !S.set.adult) { toast('Activa el contenido +18 en Ajustes para abrir este enlace'); return; }
+      const kind = known.classify(u);
+      if (kind === 'series') { openDetail({ src: known.id, id: known.seriesId ? known.seriesId(u) : u.href, title: 'Cargando…', cover: '' }); return; }
+      if (kind === 'chapter') { openReaderWith({ src: known.id, id: u.href, title: u.pathname.split('/').filter(Boolean)[1] || known.name, cover: '' }, known, [{ id: u.href, title: 'Capítulo' }], 0); return; }
+    }
+    const cur = srcById(S.current);
+    const src = (cur.cfg && !cur.builtin && !cur.hosts) || cur.id === 'web' ? cur : webSource;
     toast('Analizando página…');
     try {
       const doc = await getDoc(url);
@@ -572,13 +841,14 @@
       const sub = s.id === 'manhwaweb' ? 'Catálogo en español: portadas, sinopsis y capítulos'
         : s.id === 'mangadex' ? 'Catálogo con portadas, descripciones y capítulos'
         : s.id === 'web' ? 'Pega el enlace de cualquier serie o capítulo'
+        : s.sub ? s.sub
         : (s.cfg.searchUrl || 'Sin búsqueda (usa enlaces)');
       return `<div class="srow ${s.id === S.current ? 'on' : ''}" data-id="${esc(s.id)}"><button class="spick" data-act="pick">${esc(s.name)}<small>${esc(sub)}</small></button>${s.builtin ? '' : '<button data-act="edit">Editar</button><button data-act="del">Borrar</button>'}</div>`;
     }).join('');
     $('#settings').innerHTML = '<label>Idiomas de capítulos (MangaDex)</label>' +
       LANGS.map(([c, n]) => `<label class="tog"><input type="checkbox" data-lang="${c}" ${S.set.langs.includes(c) ? 'checked' : ''}> ${n}</label>`).join('') +
       `<label class="tog"><input type="checkbox" id="s-saver" ${S.set.saver ? 'checked' : ''}> Ahorro de datos (imágenes comprimidas)</label>` +
-      `<label class="tog"><input type="checkbox" id="s-adult" ${S.set.adult ? 'checked' : ''}> Mostrar contenido para adultos (+18) en ManhwaWeb y MangaDex</label>`;
+      `<label class="tog"><input type="checkbox" id="s-adult" ${S.set.adult ? 'checked' : ''}> Mostrar contenido para adultos (+18) en las fuentes que lo tengan</label>`;
   }
 
   function openSrcForm(cfg) {
