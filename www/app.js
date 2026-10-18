@@ -15,7 +15,7 @@
     fav: store.get('fav', []),
     hist: store.get('hist', {}),
     read: store.get('read', {}),
-    current: store.get('current', 'mangadex'),
+    current: store.get('current', 'manhwaweb'),
     set: Object.assign({ langs: ['es', 'es-la', 'en'], saver: false, adult: false, gap: false, narrow: false }, store.get('settings', {}))
   };
   const save = () => {
@@ -23,7 +23,10 @@
     store.set('read', S.read); store.set('current', S.current); store.set('settings', S.set);
   };
   const LANGS = [['es', 'Español (España)'], ['es-la', 'Español (Latam)'], ['en', 'Inglés'], ['pt-br', 'Portugués (BR)'], ['fr', 'Francés'], ['it', 'Italiano'], ['de', 'Alemán']];
-  const STATUS = { ongoing: 'En emisión', completed: 'Finalizado', hiatus: 'En pausa', cancelled: 'Cancelado' };
+  const STATUS = {
+    ongoing: 'En emisión', completed: 'Finalizado', hiatus: 'En pausa', cancelled: 'Cancelado',
+    publicandose: 'En emisión', finalizado: 'Finalizado', pausado: 'En pausa', cancelado: 'Cancelado'
+  };
 
   const keyOf = it => it.src + ':' + it.id;
   const cache = {}; // key -> item, para abrir desde las tarjetas
@@ -36,8 +39,9 @@
   }
 
   /* ---------------- Red ---------------- */
-  async function http(url, as) {
-    const r = await fetch(url, { headers: { Accept: as === 'json' ? 'application/json' : 'text/html,*/*' } });
+  async function http(url, as, extra) {
+    const headers = Object.assign({ Accept: as === 'json' ? 'application/json' : 'text/html,*/*' }, extra || {});
+    const r = await fetch(url, { headers });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     return as === 'json' ? r.json() : r.text();
   }
@@ -121,6 +125,55 @@
     }
   };
 
+  /* ---------------- Fuente: ManhwaWeb ---------------- */
+  const MW = 'https://api.manhwaweb.com';
+  const MW_H = { Referer: 'https://manhwaweb.com/', Origin: 'https://manhwaweb.com' };
+  const NON_ASCII = /[^\x00-\x7F]/;
+  const cap = s => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
+  // El sitio guarda el título en dos campos; se prefiere el que conserva los acentos.
+  const mwTitle = m => {
+    const a = m.name_esp || '', b = m.the_real_name || '';
+    return (NON_ASCII.test(b) && !NON_ASCII.test(a) ? b : (a || b)) || 'Sin título';
+  };
+  const mwItem = m => ({ src: 'manhwaweb', id: m._id, title: mwTitle(m), cover: m._imagen || '' });
+
+  const manhwaweb = {
+    id: 'manhwaweb', name: 'ManhwaWeb', builtin: true,
+    async search(q, page) {
+      const p = new URLSearchParams({
+        buscar: q || '', estado: '', tipo: '', erotico: S.set.adult ? '' : 'no', demografia: '',
+        order_item: q ? 'alfabetico' : 'creacion', order_dir: 'desc', page: String(page), generes: ''
+      });
+      const j = await http(`${MW}/manhwa/library?${p}`, 'json', MW_H);
+      return { items: (j.data || []).map(mwItem), more: !!j.next };
+    },
+    async detail(item) {
+      const j = await http(`${MW}/manhwa/see/${encodeURIComponent(item.id)}`, 'json', MW_H);
+      const genres = (j._categoris || []).map(o => Object.values(o || {})[0]).filter(Boolean);
+      const tags = [cap(j._tipo), cap(j._demografi)].concat(genres).filter(Boolean);
+      if (j._erotico === 'si') tags.push('+18');
+      const chapters = [];
+      for (const c of j.chapters || []) {
+        for (const v of c.versions || []) {
+          // El enlace termina en /leer/{id-del-capítulo}; ese id es el que pide la API de páginas.
+          const id = String(v.link || '').split('/leer/')[1];
+          if (!id) continue;
+          const group = v.joint && v.joint[0] && v.joint[0].name;
+          chapters.push({ id, num: parseFloat(c.chapter), title: `Cap. ${c.chapter}`, lang: group || '' });
+        }
+      }
+      chapters.sort((a, b) => (b.num || 0) - (a.num || 0));
+      return {
+        title: mwTitle(j), cover: j._imagen || item.cover, tags, status: j._status, chapters,
+        desc: String(j._sinopsis || '').replace(/<[^>]*>/g, '').trim()
+      };
+    },
+    async pages(ch) {
+      const j = await http(`${MW}/chapters/see/${encodeURIComponent(ch.id)}`, 'json', MW_H);
+      return (j.chapter && j.chapter.img) || [];
+    }
+  };
+
   /* ---------------- Fuente genérica (cualquier web) ---------------- */
   function generic(cfg) {
     const sel = cfg.sel || {};
@@ -151,8 +204,8 @@
     };
   }
   const webSource = generic({ id: 'web', name: 'Cualquier web (pegar enlace)', builtin: true });
-  const allSources = () => [mangadex, webSource, ...S.sources.map(generic)];
-  const srcById = id => allSources().find(s => s.id === id) || mangadex;
+  const allSources = () => [manhwaweb, mangadex, webSource, ...S.sources.map(generic)];
+  const srcById = id => allSources().find(s => s.id === id) || manhwaweb;
 
   /* ---------------- Navegación con botón atrás ---------------- */
   const stack = [];
@@ -220,8 +273,30 @@
     } finally { if (my === SR.token) SR.busy = false; }
   }
 
+  // Enlaces de manhwaweb.com: /leer/<serie>-<capítulo> abre la serie directamente en ese capítulo.
+  async function openManhwaweb(u) {
+    const m = u.pathname.match(/\/leer\/([^/?#]+)/);
+    let id, slug = null;
+    if (m) {
+      slug = decodeURIComponent(m[1]);
+      const mm = slug.match(/^(.*)-([\d.]+_\d+)$/);
+      id = mm ? mm[1] : slug;
+    } else {
+      id = decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() || '');
+    }
+    if (!id) { toast('No reconocí ese enlace de ManhwaWeb'); return; }
+    await openDetail({ src: 'manhwaweb', id, title: id, cover: '' });
+    if (slug && D && D.chapters.length) {
+      const idx = D.chapters.findIndex(c => c.id === slug);
+      if (idx >= 0) openReaderWith(D.item, D.src, D.chapters, idx);
+    }
+  }
+
   async function openUrl(url) {
-    const src = S.current === 'mangadex' ? webSource : srcById(S.current);
+    let u;
+    try { u = new URL(url); } catch (e) { toast('Enlace no válido'); return; }
+    if (/(^|\.)manhwaweb\.com$/i.test(u.hostname)) { openManhwaweb(u).catch(e => toast('Error: ' + (e.message || e))); return; }
+    const src = (S.current === 'mangadex' || S.current === 'manhwaweb') ? webSource : srcById(S.current);
     toast('Analizando página…');
     try {
       const doc = await getDoc(url);
@@ -421,7 +496,8 @@
   let editing = null;
   function renderSources() {
     $('#srclist').innerHTML = allSources().map(s => {
-      const sub = s.id === 'mangadex' ? 'Catálogo con portadas, descripciones y capítulos'
+      const sub = s.id === 'manhwaweb' ? 'Catálogo en español: portadas, sinopsis y capítulos'
+        : s.id === 'mangadex' ? 'Catálogo con portadas, descripciones y capítulos'
         : s.id === 'web' ? 'Pega el enlace de cualquier serie o capítulo'
         : (s.cfg.searchUrl || 'Sin búsqueda (usa enlaces)');
       return `<div class="srow ${s.id === S.current ? 'on' : ''}" data-id="${esc(s.id)}"><button class="spick" data-act="pick">${esc(s.name)}<small>${esc(sub)}</small></button>${s.builtin ? '' : '<button data-act="edit">Editar</button><button data-act="del">Borrar</button>'}</div>`;
@@ -429,7 +505,7 @@
     $('#settings').innerHTML = '<label>Idiomas de capítulos (MangaDex)</label>' +
       LANGS.map(([c, n]) => `<label class="tog"><input type="checkbox" data-lang="${c}" ${S.set.langs.includes(c) ? 'checked' : ''}> ${n}</label>`).join('') +
       `<label class="tog"><input type="checkbox" id="s-saver" ${S.set.saver ? 'checked' : ''}> Ahorro de datos (imágenes comprimidas)</label>` +
-      `<label class="tog"><input type="checkbox" id="s-adult" ${S.set.adult ? 'checked' : ''}> Mostrar contenido para adultos (+18)</label>`;
+      `<label class="tog"><input type="checkbox" id="s-adult" ${S.set.adult ? 'checked' : ''}> Mostrar contenido para adultos (+18) en ManhwaWeb y MangaDex</label>`;
   }
 
   function openSrcForm(cfg) {
