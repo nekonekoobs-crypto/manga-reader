@@ -281,7 +281,7 @@
   const M4 = 'https://m440.in';
   const m440 = {
     id: 'm440', name: 'M440', builtin: true, cfg: { sel: {} },
-    sub: 'm440.in · búsqueda, serie y lector probados con su HTML (la serie muestra los capítulos que trae la página)',
+    sub: 'm440.in · búsqueda, serie, capítulos y lector probados con datos reales',
     hosts: ['m440.in'], imgHeaders: nativeRef(M4),
     classify(u) {
       const seg = u.pathname.split('/').filter(Boolean);
@@ -325,15 +325,18 @@
       const found = new Map();
       const add = (cs, num, name) => {
         if (!cs || found.has(cs)) return;
-        const n = parseFloat(num != null && num !== '' ? num : cs);
+        const n = parseFloat(num != null && num !== '' ? num : cs.replace('_', '.'));
         found.set(cs, { id: `${M4}/manga/${slug}/${cs}`, num: isNaN(n) ? 0 : n, title: 'Cap. ' + (isNaN(n) ? cs : n) + (name && !/^cap[ií]tulo\s*[\d.]+$/i.test(name) ? ' — ' + name : '') });
       };
       doc.querySelectorAll('a[href*="/manga/"]').forEach(a => {
-        const m = (a.getAttribute('href') || '').match(new RegExp('/manga/' + slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/(\\d+(?:\\.\\d+)?-[a-z0-9]+)/?$'));
+        const m = (a.getAttribute('href') || '').match(new RegExp('/manga/' + slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/(\\d+(?:[._]\\d+)?-[a-z0-9]+)/?$'));
         if (m) add(m[1], null, P.clean((a.querySelector('em') || {}).textContent || ''));
       });
-      for (const m of (doc.__html || '').matchAll(/\{[^{}]*"slug":"(\d+(?:\.\d+)?-[a-z0-9]+)"[^{}]*\}/g)) {
-        try { const o = JSON.parse(m[0]); add(o.slug, o.number, o.name); } catch (e) { add(m[1]); }
+      // La lista completa viene como JSON en una variable del HTML: {"id":..,"slug":"41_6-ueyko","name":"..","number":"41.6",...}
+      for (const m of (doc.__html || '').matchAll(/"slug":"(\d+(?:_\d+)?-[a-z0-9]+)","name":"((?:[^"\\]|\\.)*)","number":"([^"]*)"/g)) {
+        let nm = m[2];
+        try { nm = JSON.parse('"' + m[2] + '"'); } catch (e) { /* se deja tal cual */ }
+        add(m[1], m[3], nm);
       }
       const chapters = [...found.values()].sort((x, y) => y.num - x.num);
       return { title, cover: `${M4}/uploads/manga/${slug}/cover/cover_250x350.jpg`, desc, tags, chapters };
@@ -554,12 +557,20 @@
   }
   window.addEventListener('popstate', () => {
     const id = stack.pop();
-    if (!id) return;
+    if (!id) { rootBack(); return; }
     $('#' + id).hidden = true;
     if (id === 'reader') { $('#rpanel').hidden = true; $('#rpages').innerHTML = ''; clearPageBlobs(); if (stack.includes('detail')) renderDetail(); }
     if (!stack.length) document.body.classList.remove('noscroll');
   });
   const goBack = () => history.back();
+  // Sin pantallas abiertas, "atrás" vuelve a Explorar y nunca cierra la app: siempre queda una entrada de historial por delante.
+  function rootBack() {
+    const cur = ($('.view.active') || {}).id;
+    if (cur && cur !== 'v-explore') setView('explore');
+    else toast('Para salir de la app usa el botón de inicio');
+    try { history.pushState({ root: 1 }, ''); } catch (e) { /* sin historial */ }
+  }
+  try { history.replaceState({ base: 1 }, ''); history.pushState({ root: 1 }, ''); } catch (e) { /* sin historial */ }
 
   function setView(v) {
     $$('.view').forEach(e => e.classList.toggle('active', e.id === 'v-' + v));
@@ -570,24 +581,28 @@
   }
 
   /* ---------------- Explorar ---------------- */
+  const ALL = 'all';
   const SR = { q: '', page: 0, busy: false, token: 0 };
 
   const cardHtml = it => {
     cache[keyOf(it)] = it;
-    return `<button class="card" data-k="${esc(keyOf(it))}"><div class="cv"><span class="ph">${esc((it.title || '?').trim().charAt(0).toUpperCase())}</span>${coverImg(it.cover, it.src)}</div><div class="ct">${esc(it.title)}</div></button>`;
+    return `<button class="card" data-k="${esc(keyOf(it))}"><div class="cv"><span class="ph">${esc((it.title || '?').trim().charAt(0).toUpperCase())}</span>${coverImg(it.cover, it.src)}${S.current === ALL ? `<span class="sb">${esc(srcById(it.src).name.replace(/ \(.*\)$/, ''))}</span>` : ''}</div><div class="ct">${esc(it.title)}</div></button>`;
   };
 
   function renderSrcSelect() {
-    $('#srcsel').innerHTML = allSources().map(s => `<option value="${esc(s.id)}" ${s.id === S.current ? 'selected' : ''}>${esc(s.name)}</option>`).join('');
+    $('#srcsel').innerHTML = `<option value="${ALL}" ${S.current === ALL ? 'selected' : ''}>Todas las fuentes</option>` + allSources().map(s => `<option value="${esc(s.id)}" ${s.id === S.current ? 'selected' : ''}>${esc(s.name)}</option>`).join('');
   }
 
-  async function runSearch(reset = true) {
-    const q = $('#q').value.trim();
+  async function runSearch(reset = true, qOverride = null) {
+    let q;
+    if (qOverride != null) q = String(qOverride).trim();
+    else { q = $('#q').value.trim(); if (reset) $('#q').value = ''; } // el cuadro se limpia solo tras buscar
     if (/^https?:\/\//i.test(q)) { openUrl(q); return; }
     if (SR.busy && !reset) return;
     if (reset) { SR.page = 0; SR.q = q; $('#results').innerHTML = '<div class="spin">Buscando…</div>'; $('#more').innerHTML = ''; }
+    if (S.current === ALL) { searchAll(); return; }
     const src = srcById(S.current);
-    if (src.id === 'web' && !q) {
+    if (src.id === 'web' && !SR.q) {
       $('#results').innerHTML = '<div class="empty">Pega arriba el enlace de una serie o de un capítulo de cualquier web y la app lo adapta al lector.</div>';
       return;
     }
@@ -613,6 +628,33 @@
       if (reset) $('#results').innerHTML = `<div class="err"><b>No se pudo cargar</b>${esc(e.message || e)}<br><br><button class="btn" id="retry">Reintentar</button></div>`;
       else toast('No se pudo cargar más resultados');
     } finally { if (my === SR.token) SR.busy = false; }
+  }
+
+  // Busca el mismo texto en todas las fuentes a la vez y va mostrando cada una cuando responde
+  async function searchAll() {
+    const box = $('#results');
+    $('#more').innerHTML = '';
+    if (!SR.q) { box.innerHTML = '<div class="empty">Escribe un título para buscarlo en todas las fuentes.</div>'; return; }
+    const srcs = allSources().filter(s => s.id !== 'web' && (!s.adult || S.set.adult));
+    const my = ++SR.token;
+    SR.busy = true;
+    box.innerHTML = `<div class="spin">Buscando en ${srcs.length} fuentes…</div>`;
+    let total = 0, firstShown = false;
+    const failed = [];
+    const limit = ms => new Promise((_, no) => setTimeout(() => no(new Error('tiempo agotado')), ms));
+    await Promise.all(srcs.map(s => Promise.race([s.search(SR.q, 0), limit(20000)]).then(r => {
+      if (my !== SR.token) return;
+      const items = ((r && r.items) || []).slice(0, 12);
+      if (!items.length) return;
+      if (!firstShown) { box.innerHTML = ''; firstShown = true; }
+      total += items.length;
+      box.insertAdjacentHTML('beforeend', `<div class="rhead">${esc(s.name)}</div>` + items.map(cardHtml).join(''));
+      hydrate(box);
+    }).catch(() => { failed.push(s.name); })));
+    if (my !== SR.token) return;
+    SR.busy = false;
+    if (!total) box.innerHTML = `<div class="empty">Sin resultados para “${esc(SR.q)}” en ninguna fuente.</div>`;
+    if (failed.length) box.insertAdjacentHTML('beforeend', `<div class="rnote">No respondieron: ${esc(failed.join(', '))}</div>`);
   }
 
   // Enlaces de manhwaweb.com: /leer/<serie>-<capítulo> abre la serie directamente en ese capítulo.
@@ -853,10 +895,10 @@
     html += '<h2 class="sec">Continuar leyendo</h2>';
     html += hist.length ? hist.map(h => {
       cache[keyOf(h.item)] = h.item;
-      return `<button class="lrow" data-k="${esc(keyOf(h.item))}"><div class="cv"><span class="ph">${esc((h.item.title || '?').charAt(0).toUpperCase())}</span>${coverImg(h.item.cover, h.item.src)}</div><div><b>${esc(h.item.title)}</b><small>${esc(h.chapterTitle)}</small></div></button>`;
+      return `<div class="lrw"><button class="lrow" data-k="${esc(keyOf(h.item))}"><div class="cv"><span class="ph">${esc((h.item.title || '?').charAt(0).toUpperCase())}</span>${coverImg(h.item.cover, h.item.src)}</div><div><b>${esc(h.item.title)}</b><small>${esc(h.chapterTitle)}</small></div></button><button class="rm" data-rmh="${esc(keyOf(h.item))}" aria-label="Quitar de Continuar leyendo">✕</button></div>`;
     }).join('') : '<p class="hint">Aún no has leído nada.</p>';
     html += '<h2 class="sec">Favoritos</h2>';
-    html += S.fav.length ? `<div class="grid">${S.fav.map(f => cardHtml(f)).join('')}</div>` : '<p class="hint">Toca ☆ en una serie para guardarla aquí.</p>';
+    html += S.fav.length ? `<div class="grid">${S.fav.map(f => `<div class="cardw">${cardHtml(f)}<button class="rm" data-rmf="${esc(f.key)}" aria-label="Quitar de favoritos">✕</button></div>`).join('')}</div>` : '<p class="hint">Toca ☆ en una serie para guardarla aquí.</p>';
     $('#library').innerHTML = html;
     hydrate($('#library'));
   }
@@ -960,14 +1002,24 @@
   /* ---------------- Eventos ---------------- */
   $('#nav').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setView(b.dataset.v); });
   $('#sf').addEventListener('submit', e => { e.preventDefault(); $('#q').blur(); runSearch(true); });
-  $('#srcsel').addEventListener('change', e => { S.current = e.target.value; save(); runSearch(true); });
+  $('#srcsel').addEventListener('change', e => { S.current = e.target.value; save(); runSearch(true, SR.q); });
 
   document.addEventListener('click', e => {
     const t = e.target;
+    const rh = t.closest('[data-rmh]');
+    if (rh) {
+      if (confirm('¿Quitar de «Continuar leyendo»?')) { delete S.hist[rh.dataset.rmh]; save(); renderLibrary(); }
+      return;
+    }
+    const rf = t.closest('[data-rmf]');
+    if (rf) {
+      if (confirm('¿Quitar de favoritos?')) { S.fav = S.fav.filter(f => f.key !== rf.dataset.rmf); save(); renderLibrary(); }
+      return;
+    }
     const card = t.closest('[data-k]');
     if (card && cache[card.dataset.k]) { openDetail(cache[card.dataset.k]); return; }
     if (t.closest('#loadmore')) { SR.page++; runSearch(false); return; }
-    if (t.closest('#retry')) { runSearch(true); return; }
+    if (t.closest('#retry')) { runSearch(true, SR.q); return; }
     if (t.closest('#d-retry')) { openDetailRetry(); return; }
     if (t.closest('#d-more')) { D.full = !D.full; renderDetail(); return; }
     if (t.closest('#d-order')) { D.asc = !D.asc; renderDetail(); return; }
