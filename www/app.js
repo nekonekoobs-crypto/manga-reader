@@ -277,6 +277,56 @@
     };
   }
 
+  // M440 guarda la lista de capítulos cifrada (CryptoJS AES con contraseña, formato {ct, iv, s}) en la variable UsaPoncho
+  // y su propio script la descifra con una clave fija. Aquí se repite ese descifrado con WebCrypto.
+  const M4_PASS = 'X^Ib1O*HLVh%3W2t';
+  function md5(bytes) {
+    const K = new Uint32Array(64), S = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
+    for (let i = 0; i < 64; i++) K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296);
+    const n = bytes.length, total = ((n + 8) >> 6) * 64 + 64;
+    const buf = new Uint8Array(total); buf.set(bytes); buf[n] = 0x80;
+    const dv = new DataView(buf.buffer);
+    dv.setUint32(total - 8, (n * 8) >>> 0, true); dv.setUint32(total - 4, Math.floor(n / 0x20000000), true);
+    let a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476;
+    for (let o = 0; o < total; o += 64) {
+      const M = new Uint32Array(16); for (let i = 0; i < 16; i++) M[i] = dv.getUint32(o + i * 4, true);
+      let A = a0, B = b0, C = c0, D = d0;
+      for (let i = 0; i < 64; i++) {
+        let F, g;
+        if (i < 16) { F = (B & C) | (~B & D); g = i; }
+        else if (i < 32) { F = (D & B) | (~D & C); g = (5 * i + 1) % 16; }
+        else if (i < 48) { F = B ^ C ^ D; g = (3 * i + 5) % 16; }
+        else { F = C ^ (B | ~D); g = (7 * i) % 16; }
+        F = (F + A + K[i] + M[g]) >>> 0;
+        A = D; D = C; C = B;
+        const r = S[(i >> 4) * 4 + (i % 4)];
+        B = (B + ((F << r) | (F >>> (32 - r)))) >>> 0;
+      }
+      a0 = (a0 + A) >>> 0; b0 = (b0 + B) >>> 0; c0 = (c0 + C) >>> 0; d0 = (d0 + D) >>> 0;
+    }
+    const out = new Uint8Array(16), ov = new DataView(out.buffer);
+    ov.setUint32(0, a0, true); ov.setUint32(4, b0, true); ov.setUint32(8, c0, true); ov.setUint32(12, d0, true);
+    return out;
+  }
+  const concatBytes = (...p) => { const o = new Uint8Array(p.reduce((n, x) => n + x.length, 0)); let k = 0; p.forEach(x => { o.set(x, k); k += x.length; }); return o; };
+  const hexBytes = h => Uint8Array.from((h.match(/../g) || []).map(x => parseInt(x, 16)));
+  const b64Bytes = b => Uint8Array.from(atob(b), c => c.charCodeAt(0));
+  async function m4Decrypt(html) {
+    const i = html.indexOf('{\\"ct\\":');
+    if (i < 0) return null;
+    const j = html.indexOf('";', i);
+    const o = JSON.parse(JSON.parse('"' + html.slice(i, j) + '"'));
+    const pass = new TextEncoder().encode(M4_PASS), salt = o.s ? hexBytes(o.s) : new Uint8Array(0);
+    // EVP_BytesToKey (MD5, 1 vuelta): clave de 32 bytes + IV de 16
+    let d = new Uint8Array(0), kd = new Uint8Array(0);
+    while (kd.length < 48) { d = md5(concatBytes(d, pass, salt)); kd = concatBytes(kd, d); }
+    const key = await crypto.subtle.importKey('raw', kd.slice(0, 32), 'AES-CBC', false, ['decrypt']);
+    const plain = await crypto.subtle.decrypt({ name: 'AES-CBC', iv: kd.slice(32, 48) }, key, b64Bytes(o.ct));
+    let v = new TextDecoder().decode(plain);
+    for (let k = 0; k < 3 && typeof v === 'string'; k++) v = JSON.parse(v);
+    return Array.isArray(v) ? v : null;
+  }
+
   // m440.in (lector con búsqueda JSON, series en /manga/{slug} y capítulos en /manga/{slug}/{n}-{id})
   const M4 = 'https://m440.in';
   const m440 = {
@@ -333,6 +383,10 @@
         if (m) add(m[1], null, P.clean((a.querySelector('em') || {}).textContent || ''));
       });
       // La lista completa viene como JSON en una variable del HTML: {"id":..,"slug":"41_6-ueyko","name":"..","number":"41.6",...}
+      try {
+        const list = await m4Decrypt(doc.__html || '');
+        (list || []).forEach(o => add(o.slug, o.number, o.name));
+      } catch (e) { /* si cambian el cifrado, se usa lo que traiga el HTML */ }
       for (const m of (doc.__html || '').matchAll(/"slug":"(\d+(?:_\d+)?-[a-z0-9]+)","name":"((?:[^"\\]|\\.)*)","number":"([^"]*)"/g)) {
         let nm = m[2];
         try { nm = JSON.parse('"' + m[2] + '"'); } catch (e) { /* se deja tal cual */ }
