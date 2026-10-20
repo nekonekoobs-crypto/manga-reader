@@ -281,7 +281,7 @@
   const M4 = 'https://m440.in';
   const m440 = {
     id: 'm440', name: 'M440', builtin: true, cfg: { sel: {} },
-    sub: 'm440.in · puede pedir verificación de Cloudflare',
+    sub: 'm440.in · búsqueda, serie y lector probados con su HTML (la serie muestra los capítulos que trae la página)',
     hosts: ['m440.in'], imgHeaders: nativeRef(M4),
     classify(u) {
       const seg = u.pathname.split('/').filter(Boolean);
@@ -289,33 +289,60 @@
       return seg.length === 2 ? 'series' : seg.length >= 3 ? 'chapter' : null;
     },
     async search(q, page) {
+      const slugOf = h => { const m = String(h).match(/\/manga\/([^/?#]+)\/?$/); return m ? m[1] : ''; };
+      const mk = (slug, title) => ({ src: 'm440', id: `${M4}/manga/${slug}`, title: title || slug, cover: `${M4}/uploads/manga/${slug}/cover/cover_250x350.jpg` });
       if (q) {
+        // El buscador del sitio es un autocompletado: GET /search?q=texto -> [{value: título, data: slug}]
         if (page) return { items: [], more: false };
-        const j = await http(`${M4}/search?query=${encodeURIComponent(q)}`, 'json', { 'X-Requested-With': 'XMLHttpRequest' });
-        const items = (j.suggestions || []).filter(x => x.data).map(x => ({
-          src: 'm440', id: `${M4}/manga/${x.data}`, title: x.value, cover: `${M4}/uploads/manga/${x.data}/cover/cover_250x350.jpg`
-        }));
-        return { items, more: false };
+        const j = await http(`${M4}/search?q=${encodeURIComponent(q)}`, 'json', { 'X-Requested-With': 'XMLHttpRequest' });
+        const arr = Array.isArray(j) ? j : (j.suggestions || j.data || []);
+        return { items: arr.filter(x => x && x.data).map(x => mk(x.data, x.value || x.label)), more: false };
       }
-      const url = `${M4}/filterList?page=${page + 1}&sortBy=last_release&asc=false`;
-      const doc = await getDoc(url);
-      const items = P.parseList(doc, url, {}).filter(it => /\/manga\/[^/]+\/?$/.test(it.url))
-        .map(it => ({ src: 'm440', id: it.url, title: it.title, cover: it.cover }));
-      return { items, more: items.length >= 10 };
+      // Sin texto: lista general de mangas (si no hay, la portada)
+      let doc;
+      try { doc = await getDoc(`${M4}/manga-list${page ? '?page=' + (page + 1) : ''}`); } catch (e) { doc = null; }
+      const seen = new Set(), items = [];
+      const scan = d => d && d.querySelectorAll('a[href*="/manga/"]').forEach(a => {
+        const slug = slugOf(P.abs(a.getAttribute('href'), M4));
+        if (!slug || seen.has(slug)) return;
+        const t = P.clean(a.getAttribute('title') || a.getAttribute('alt') || a.textContent);
+        if (!t) return;
+        seen.add(slug); items.push(mk(slug, t));
+      });
+      scan(doc);
+      if (!items.length && !page) scan(await getDoc(M4 + '/'));
+      return { items, more: items.length >= 20 };
     },
     async detail(item) {
       const doc = await getDoc(item.id);
       const slug = item.id.split(/[?#]/)[0].replace(/\/$/, '').split('/').pop();
-      const title = textOf(doc, ['h2.widget-title', 'h1', '.widget-title']) || item.title;
-      const desc = textOf(doc, ['.well p', '.manga .well', '.summary']) || metaOf(doc, 'og:description');
-      const tags = [...doc.querySelectorAll('.dl-horizontal a[href*="/filterList"], .tag-links a')].map(a => P.clean(a.textContent)).filter(Boolean);
-      let chapters = P.parseChapters(doc, item.id, { chapter: 'ul.chapters li a, .chapters a' });
-      if (!chapters.length) chapters = P.parseChapters(doc, item.id, {}).filter(c => c.id.includes('/manga/' + slug + '/'));
+      // El <title> es "Nombre - M440.in"; el h2 de la página dice "Nombre Capítulos:", así que no sirve
+      const title = P.clean((doc.title || '').replace(/\s*-\s*M440\.in\s*$/i, '')) || item.title;
+      const desc = textOf(doc, ['.well p:not(:empty)', '.well']).replace(/^Sinopsis\s*/i, '') || metaOf(doc, 'og:description');
+      const tags = [...doc.querySelectorAll('.tag-links a, a[href*="/manga-list/category/"]')].map(a => P.clean(a.textContent)).filter(Boolean);
+      // La lista completa la dibuja el sitio con JavaScript. Se toma de lo que venga en el HTML:
+      // enlaces /manga/{slug}/{n}-{id} (botones y lista) y objetos JSON con "slug":"{n}-{id}".
+      const found = new Map();
+      const add = (cs, num, name) => {
+        if (!cs || found.has(cs)) return;
+        const n = parseFloat(num != null && num !== '' ? num : cs);
+        found.set(cs, { id: `${M4}/manga/${slug}/${cs}`, num: isNaN(n) ? 0 : n, title: 'Cap. ' + (isNaN(n) ? cs : n) + (name && !/^cap[ií]tulo\s*[\d.]+$/i.test(name) ? ' — ' + name : '') });
+      };
+      doc.querySelectorAll('a[href*="/manga/"]').forEach(a => {
+        const m = (a.getAttribute('href') || '').match(new RegExp('/manga/' + slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/(\\d+(?:\\.\\d+)?-[a-z0-9]+)/?$'));
+        if (m) add(m[1], null, P.clean((a.querySelector('em') || {}).textContent || ''));
+      });
+      for (const m of (doc.__html || '').matchAll(/\{[^{}]*"slug":"(\d+(?:\.\d+)?-[a-z0-9]+)"[^{}]*\}/g)) {
+        try { const o = JSON.parse(m[0]); add(o.slug, o.number, o.name); } catch (e) { add(m[1]); }
+      }
+      const chapters = [...found.values()].sort((x, y) => y.num - x.num);
       return { title, cover: `${M4}/uploads/manga/${slug}/cover/cover_250x350.jpg`, desc, tags, chapters };
     },
     async pages(ch) {
-      const doc = await getDoc(ch.id);
-      let urls = P.readerImages(doc, ch.id, { image: '#all img, .viewer-cnt img' });
+      // Los enlaces de lectura terminan en /{página}; la página del capítulo trae todas las imágenes
+      const url = ch.id.replace(/(\/manga\/[^/]+\/[^/]+)\/\d+$/, '$1');
+      const doc = await getDoc(url);
+      let urls = P.readerImages(doc, url, { image: '#all img, .viewer-cnt img' });
       if (urls.length < 2) urls = P.readerImages(doc, ch.id, {});
       return urls;
     }
