@@ -195,6 +195,7 @@
         const cover = P.abs(meta('og:image'), item.id) || item.cover;
         const desc = txt(sel.desc) || meta('og:description') || meta('description') || '';
         const chapters = P.parseChapters(doc, item.id, sel);
+        chapters.forEach(c => { c.title = tidyTitle(c.title); });
         return { title, cover, desc, tags: [], chapters };
       },
       async pages(ch) {
@@ -206,6 +207,16 @@
 
   /* ---------------- Fuentes preconfiguradas ----------------
      Cada una declara `hosts` (para reconocer enlaces pegados) y `classify(url)` -> 'series' | 'chapter' | null. */
+  // Deja el nombre del capítulo limpio: sin fechas, "hace 3 días" ni etiquetas NEW
+  const MES = '(?:ene|feb|mar|abr|may|jun|jul|ago|sep|sept|oct|nov|dic|jan|apr|aug|dec)[a-z]*\\.?';
+  const DATE_RE = [new RegExp('\\b\\d{1,2}[\\s/.-]' + MES + '[\\s/.,-]*\\d{2,4}\\b', 'gi'), new RegExp('\\b' + MES + '\\s+\\d{1,2},?\\s+\\d{4}\\b', 'gi'),
+    /\b\d{4}-\d{2}-\d{2}\b/g, /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g, /\bhace\s+\d+\s+\p{L}+/giu, /\b\d+\s+(?:hours?|days?|weeks?|months?|horas?|d[ií]as?|semanas?|meses)\s+ago\b/gi, /\b(?:new|nuevo|hot|end|fin)\b/gi];
+  const tidyTitle = t => {
+    let x = String(t || '');
+    DATE_RE.forEach(r => { x = x.replace(r, ' '); });
+    x = x.replace(/\s+/g, ' ').replace(/^[\s\-–—|·:]+|[\s\-–—|·:]+$/g, '').trim();
+    return x || String(t || '').trim();
+  };
   const origin = b => b.replace(/\/+$/, '');
   const nativeRef = base => ({ Referer: origin(base) + '/', Origin: origin(base) });
   const textOf = (doc, sels) => { for (const s of sels) { const e = doc.querySelector(s); const t = e && P.clean(e.textContent); if (t) return t; } return ''; };
@@ -266,7 +277,7 @@
             } catch (e) { /* probar el siguiente */ }
           }
         }
-        chapters.forEach(c => { c.id = withList(c.id); });
+        chapters.forEach(c => { c.id = withList(c.id); c.title = tidyTitle(c.title); });
         return { title, cover, desc, tags, chapters };
       },
       async pages(ch) {
@@ -419,6 +430,30 @@
       return null;
     }
   });
+  {
+    // Los capítulos se ordenan por el número que lleva su enlace (capitulo-20-5 = 20.5) y se descartan los enlaces de otras series
+    const gd = leermanhwas.detail;
+    leermanhwas.detail = async function (item) {
+      const info = await gd.call(this, item);
+      let base = '';
+      try { base = new URL(item.id).pathname.replace(/\/?$/, '/'); } catch (e) { /* sin ruta */ }
+      const seen = new Set(), out = [];
+      for (const c of info.chapters || []) {
+        let path = '';
+        try { path = new URL(c.id).pathname; } catch (e) { continue; }
+        const m = path.match(/\/capitulo-(\d+(?:-\d+)?)\/?$/i);
+        if (!m || (base && !path.startsWith(base)) || seen.has(path)) continue;
+        seen.add(path);
+        const num = parseFloat(m[1].replace('-', '.'));
+        out.push({ id: c.id, num, title: 'Capítulo ' + num });
+      }
+      out.sort((a, b) => b.num - a.num);
+      info.chapters = out;
+      // El título de la página trae el nombre del sitio: "Obra +18 - Manhwa Erótico en Español - LeerManhwas.COM"
+      info.title = String(info.title || '').replace(/\s*\+18\s*[-–|].*$/i, '').replace(/\s*[-–|]\s*(?:Manhwa|LeerManhwas).*$/i, '').trim() || info.title;
+      return info;
+    };
+  }
   {
     const g = leermanhwas.search;
     leermanhwas.search = async (q, page) => {
