@@ -402,47 +402,46 @@
 
   // TMOHentai: el listado viene como HTML (a veces dentro de {"html": ...}); cada obra se identifica por su número.
   // Oculta y no abre obras cuyo título o etiquetas apunten a menores de edad.
-  const TH = 'https://tmohentai.app';
-  const MINOR_RE = ;
-  const thId = u => (String(u).match(/\/(?:library\/[^/]+|manga|view_uploads)\/(\d+)/) || [])[1] || '';
-  const tmohentai = {
-    id: 'tmohentai', name: 'TMOHentai (+18)', builtin: true, adult: true, cfg: { sel: {} },
-    sub: 'tmohentai.app · listado, detalle y lector probados con HTML real',
-    hosts: ['tmohentai.app'], imgHeaders: nativeRef(TH),
-    classify(u) {
-      if (/^\/library\/[^/]+\/\d+/.test(u.pathname)) return 'series';
-      if (/^\/(manga|view_uploads)\/\d+/.test(u.pathname)) return 'chapter';
-      return null;
-    },
-    async search(q, page) {
-      const url = `${TH}/?title=${encodeURIComponent(q || '')}&_=${Date.now()}&page=${page + 1}`;
-      const r = await fetch(url, { headers: { Accept: 'application/json, text/html, */*', 'X-Requested-With': 'XMLHttpRequest' } });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      let body = await r.text();
-      try { const j = JSON.parse(body); if (j && j.html) body = j.html; } catch (e) { /* ya era HTML */ }
-      const doc = new DOMParser().parseFromString(body, 'text/html');
-      const total = parseInt(((doc.querySelector('[data-total]') || {}).dataset || {}).total, 10);
-      const items = [];
-      for (const a of doc.querySelectorAll('a.manga-card')) {
-        const title = P.clean((a.querySelector('.manga-card__title') || {}).textContent || a.getAttribute('title'));
-        if (MINOR_RE.test(title)) continue;
-        const pg = parseInt(P.clean(((a.querySelector('.manga-card__stat--chapters span:last-child') || {}).textContent) || ''), 10);
-        items.push({ src: 'tmohentai', id: P.abs(a.getAttribute('href'), TH), title, cover: P.imgSrc(a.querySelector('img.manga-card__cover, img'), TH), n: pg || 0 });
-      }
-      return { items, more: isNaN(total) ? items.length >= 20 : (page + 1) * 24 < total };
-    },
-    async detail(item) {
-      const num = thId(item.id);
-      const doc = await getDoc(item.id);
-      const tags = [...new Set([...doc.querySelectorAll('a[href*="/tag/"]')].map(a => P.clean(a.textContent)).filter(t => t && t.length < 40))].slice(0, 12);
-      const title = textOf(doc, ['#md-title', 'h1']) || item.title;
-      if (MINOR_RE.test(title) || tags.some(t => MINOR_RE.test(t))) throw new Error('Contenido bloqueado por la app.');
-      const desc = (metaOf(doc, 'og:description') || metaOf(doc, 'description')).replace(/^Lee .*? en línea gratis\.\s*/i, '');
-      const cover = P.imgSrc(doc.querySelector('#md-cover'), TH) || item.cover || `https://storage.tmohentai.app/mangas/${num}/1.webp`;
-      const total = parseInt(((doc.querySelector('#md-preview-grid') || {}).dataset || {}).total, 10) || parseInt(item.n, 10) || 0;
-      // Cada obra se lee como un solo capítulo (/view_uploads/{id}); data-total es su número de páginas
-      return { title, cover, desc, tags, status: /ongoing/i.test(doc.body.textContent) ? 'ongoing' : '', chapters: [{ id: `${TH}/view_uploads/${num}`, title: 'Leer' + (total ? ` (${total} páginas)` : ''), num: total }] };
-    },
+ const TH = 'https://tmohentai.app';
+const MINOR_RE = null; // filtro loli/shota DESACTIVADO (pon el regex aquí para reactivar)
+const thId = u => (String(u).match(/\/(?:library\/[^/]+|manga|view_uploads)\/(\d+)/) || [])[1] || '';
+const tmohentai = {
+  id: 'tmohentai', name: 'TMOHentai (+18)', builtin: true, adult: true, cfg: { sel: {} },
+  sub: 'tmohentai.app · listado, detalle y lector probados con HTML real',
+  hosts: ['tmohentai.app'], imgHeaders: nativeRef(TH),
+  classify(u) {
+    if (/^\/library\/[^/]+\/\d+/.test(u.pathname)) return 'series';
+    if (/^\/(manga|view_uploads)\/\d+/.test(u.pathname)) return 'chapter';
+    return null;
+  },
+  async search(q, page) {
+    const url = `${TH}/?title=${encodeURIComponent(q || '')}&_=${Date.now()}&page=${page + 1}`;
+    const r = await fetch(url, { headers: { Accept: 'application/json, text/html, */*', 'X-Requested-With': 'XMLHttpRequest' } });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    let body = await r.text();
+    try { const j = JSON.parse(body); if (j && j.html) body = j.html; } catch (e) { /* ya era HTML */ }
+    const doc = new DOMParser().parseFromString(body, 'text/html');
+    const total = parseInt(((doc.querySelector('[data-total]') || {}).dataset || {}).total, 10);
+    const items = [];
+    for (const a of doc.querySelectorAll('a.manga-card')) {
+      const title = P.clean((a.querySelector('.manga-card__title') || {}).textContent || a.getAttribute('title'));
+      if (MINOR_RE && MINOR_RE.test(title)) continue;
+      const pg = parseInt(P.clean(((a.querySelector('.manga-card__stat--chapters span:last-child') || {}).textContent) || ''), 10);
+      items.push({ src: 'tmohentai', id: P.abs(a.getAttribute('href'), TH), title, cover: P.imgSrc(a.querySelector('img.manga-card__cover, img'), TH), n: pg || 0 });
+    }
+    return { items, more: isNaN(total) ? items.length >= 20 : (page + 1) * 24 < total };
+  },
+  async detail(item) {
+    const num = thId(item.id);
+    const doc = await getDoc(item.id);
+    const tags = [...new Set([...doc.querySelectorAll('a[href*="/tag/"]')].map(a => P.clean(a.textContent)).filter(t => t && t.length < 40))].slice(0, 12);
+    const title = textOf(doc, ['#md-title', 'h1']) || item.title;
+    if (MINOR_RE && (MINOR_RE.test(title) || tags.some(t => MINOR_RE.test(t)))) throw new Error('Contenido bloqueado por la app.');
+    const desc = (metaOf(doc, 'og:description') || metaOf(doc, 'description')).replace(/^Lee .*? en línea gratis\.\s*/i, '');
+    const cover = P.imgSrc(doc.querySelector('#md-cover'), TH) || item.cover || `https://storage.tmohentai.app/mangas/${num}/1.webp`;
+    const total = parseInt(((doc.querySelector('#md-preview-grid') || {}).dataset || {}).total, 10) || parseInt(item.n, 10) || 0;
+    return { title, cover, desc, tags, status: /ongoing/i.test(doc.body.textContent) ? 'ongoing' : '', chapters: [{ id: `${TH}/view_uploads/${num}`, title: 'Leer' + (total ? ` (${total} páginas)` : ''), num: total }] };
+  },
     async pages(ch) {
       const num = thId(ch.id);
       const rx = new RegExp(`https?:\\\\?/\\\\?/storage\\.tmohentai\\.app\\\\?/mangas\\\\?/${num}\\\\?/[^"'\\s<>\\\\)]+?\\.(?:webp|jpe?g|png)`, 'gi');
