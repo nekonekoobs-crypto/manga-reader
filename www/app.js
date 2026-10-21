@@ -403,7 +403,7 @@
   // TMOHentai: el listado viene como HTML (a veces dentro de {"html": ...}); cada obra se identifica por su número.
   // Oculta y no abre obras cuyo título o etiquetas apunten a menores de edad.
   const TH = 'https://tmohentai.app';
-  //const MINOR_RE = /\b(lol[ií]|lolic[oó]n|loli|shota|shotacon|shotac[oó]n|ni[ñn]a|ni[ñn]o|child|kid|underage|menor(es)?\s+de\s+edad)\b/i;
+  const MINOR_RE = ;
   const thId = u => (String(u).match(/\/(?:library\/[^/]+|manga|view_uploads)\/(\d+)/) || [])[1] || '';
   const tmohentai = {
     id: 'tmohentai', name: 'TMOHentai (+18)', builtin: true, adult: true, cfg: { sel: {} },
