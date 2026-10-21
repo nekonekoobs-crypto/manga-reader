@@ -403,7 +403,7 @@
   // TMOHentai: el listado viene como HTML (a veces dentro de {"html": ...}); cada obra se identifica por su número.
   // Oculta y no abre obras cuyo título o etiquetas apunten a menores de edad.
   const TH = 'https://tmohentai.app';
-  const MINOR_RE = /\b(lol[ií]|lolic[oó]n|loli|shota|shotacon|shotac[oó]n|ni[ñn]a|ni[ñn]o|child|kid|underage|menor(es)?\s+de\s+edad)\b/i;
+  //const MINOR_RE = /\b(lol[ií]|lolic[oó]n|loli|shota|shotacon|shotac[oó]n|ni[ñn]a|ni[ñn]o|child|kid|underage|menor(es)?\s+de\s+edad)\b/i;
   const thId = u => (String(u).match(/\/(?:library\/[^/]+|manga|view_uploads)\/(\d+)/) || [])[1] || '';
   const tmohentai = {
     id: 'tmohentai', name: 'TMOHentai (+18)', builtin: true, adult: true, cfg: { sel: {} },
@@ -481,7 +481,8 @@
       return null;
     },
     async search(q, page) {
-      const url = `${ZT}/biblioteca?${q ? 'title=' + encodeURIComponent(q) + '&' : ''}_pg=${page + 1}`;
+      // Como en TMO original: _pg=1 fijo y page=N para la página (la primera va sin page)
+      const url = `${ZT}/biblioteca?_pg=1${q ? '&title=' + encodeURIComponent(q) : ''}${page ? '&page=' + (page + 1) : ''}`;
       let items = [];
       try {
         const doc = await getDoc(url);
@@ -495,7 +496,7 @@
           .map(m => ({ src: 'zonatmo', id: P.abs(m.url, ZT), title: m.title, cover: m.cover || ztCover(ztNum(m.url)) }));
         return { items, more: false };
       }
-      return { items, more: items.length >= 18 };
+      return { items, more: items.length > 0 };
     },
     async detail(item) {
       const doc = await getDoc(item.id);
@@ -620,7 +621,7 @@
 
   /* ---------------- Explorar ---------------- */
   const ALL = 'all';
-  const SR = { q: '', page: 0, busy: false, token: 0 };
+  const SR = { q: '', page: 0, busy: false, token: 0, seen: new Set() };
 
   const cardHtml = it => {
     cache[keyOf(it)] = it;
@@ -653,14 +654,16 @@
     try {
       const r = await src.search(SR.q, SR.page);
       if (my !== SR.token) return;
-      if (reset) $('#results').innerHTML = '';
-      if (!r.items.length && reset) {
+      if (reset) { $('#results').innerHTML = ''; SR.seen = new Set(); }
+      // Si una página repite resultados ya mostrados (el sitio ignoró la paginación), no se vuelven a pintar
+      const fresh = r.items.filter(it => { const k = keyOf(it); if (SR.seen.has(k)) return false; SR.seen.add(k); return true; });
+      if (!fresh.length && reset) {
         $('#results').innerHTML = `<div class="empty">Sin resultados${SR.q ? ` para “${esc(SR.q)}”` : ''}.</div>`;
       } else {
-        $('#results').insertAdjacentHTML('beforeend', r.items.map(cardHtml).join(''));
+        $('#results').insertAdjacentHTML('beforeend', fresh.map(cardHtml).join(''));
         hydrate($('#results'));
       }
-      $('#more').innerHTML = r.more ? '<button class="btn ghost" id="loadmore">Cargar más</button>' : '';
+      $('#more').innerHTML = r.more && (fresh.length || reset) ? '<button class="btn ghost" id="loadmore">Cargar más</button>' : '';
     } catch (e) {
       if (my !== SR.token) return;
       if (reset) $('#results').innerHTML = `<div class="err"><b>No se pudo cargar</b>${esc(e.message || e)}<br><br><button class="btn" id="retry">Reintentar</button></div>`;
