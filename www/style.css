@@ -1,3 +1,4 @@
+@font-face{font-family:'UnifrakturCook';src:url('fonts/UnifrakturCook-Bold.ttf') format('truetype');font-weight:700;font-style:normal;font-display:swap}
 :root{
   --bg:#0d0d11; --sf:#16161c; --sf2:#1f1f28; --ln:#2a2a35;
   --tx:#ececf1; --mt:#8d8d9c; --ac:#ff5a4e; --ac2:#ffb347;
@@ -19,7 +20,7 @@ h1,h2,h3{margin:0}
 
 .top{position:sticky;top:0;z-index:5;background:linear-gradient(var(--bg) 85%,transparent);
   padding:calc(var(--st) + 4px) 0 10px;margin-top:calc(-1 * var(--st))}
-.brand{font-size:24px;font-weight:800;letter-spacing:-.02em;margin-bottom:10px}
+.brand{font-family:'UnifrakturCook','Old English Text MT',Georgia,serif;font-size:30px;font-weight:700;letter-spacing:.01em;line-height:1.1;margin-bottom:10px}
 .brand span{color:var(--ac)}
 #sf{display:flex;gap:8px}
 #sf button{flex:none;width:46px;border-radius:10px;background:var(--ac);color:#fff;display:grid;place-items:center}
@@ -168,3 +169,35 @@ textarea{width:100%;margin-top:10px;background:var(--sf2);color:var(--tx);border
 textarea:focus{border-color:var(--ac)}
 textarea[hidden]{display:none}
 #backup h3{font-size:16px;margin-bottom:4px}
+
+/* ===== Logo y personalización ===== */
+body{background:transparent}
+#nav{background:var(--navbg,rgba(18,18,24,.96))}
+.brandrow{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.brandrow .brand{margin:0;flex:1;min-width:0}
+.logo{flex:none;width:64px;height:64px;display:block;color:var(--tx)}
+.logo svg,.logo img{width:100%;height:100%;object-fit:contain;display:block}
+.iconbtn{flex:none;width:40px;height:40px;border-radius:10px;display:grid;place-items:center;
+  background:var(--sf2);border:1px solid var(--ln);color:var(--mt)}
+#bgfx{position:fixed;inset:0;z-index:-1;background-size:cover;background-position:center}
+body.hasbg .top{background:var(--topbg);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+#theme{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.7);display:flex;align-items:flex-end;justify-content:center}
+#theme[hidden]{display:none}
+.tbox{width:100%;max-width:520px;max-height:92vh;overflow:auto;background:var(--sf);border:1px solid var(--ln);
+  border-radius:18px 18px 0 0;padding:18px 16px calc(18px + var(--sb))}
+.tbox h3{font-size:18px;margin-bottom:4px}
+.tbox h4{margin:16px 0 8px;font-size:13px;color:var(--mt);text-transform:uppercase;letter-spacing:.06em}
+.tbox .hint{margin:6px 0 12px}
+.tbox label{display:block;margin:8px 0;font-size:13px;color:var(--mt)}
+.tbox input[type=password]{margin-top:4px}
+.tbox input[type=color]{padding:2px;height:40px;width:56px;flex:none}
+.tbox input[type=range]{padding:0;border:0;background:none}
+.sw{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.sw button{width:36px;height:36px;border-radius:50%;border:2px solid var(--ln)}
+.sw button.on{border-color:var(--tx);box-shadow:0 0 0 2px var(--sf) inset}
+.trow{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.terr{color:#ff6b6b;font-size:13px;min-height:18px;margin-top:6px}
+.shake{animation:shk .3s}
+@keyframes shk{25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+.logoprev{display:flex;align-items:center;gap:12px}
+.logoprev .logo{width:110px;height:110px}
