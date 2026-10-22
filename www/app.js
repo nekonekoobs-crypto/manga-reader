@@ -466,6 +466,7 @@ const tmohentai = {
     }
   };
 
+
   // ZonaTMO: series en /library/{tipo}/{id}/{slug}, capítulos en /view_uploads/{id} (imágenes en storage.zonatmo.org)
   const ZT = 'https://zonatmo.org';
   const ztCover = id => (id ? `${ZT}/storage/covers/${id}.webp?v=2` : '');
@@ -1051,7 +1052,7 @@ const tmohentai = {
     <input type="file" id="bk-file" accept=".json,application/json,text/plain" hidden></div>`;
   const backupData = () => ({ app: 'mangareader', v: 1, at: new Date().toISOString(), fav: S.fav, hist: S.hist, read: S.read, sources: S.sources });
   function mergeBackup(o) {
-    if (!o || o.app !== 'mangareader' || typeof o !== 'object') throw new Error('Este archivo no es un respaldo de Manga Reader');
+    if (!o || o.app !== 'mangareader' || typeof o !== 'object') throw new Error('Este archivo no es un respaldo de Lector OBS');
     let nf = 0, nh = 0, ns = 0;
     (Array.isArray(o.fav) ? o.fav : []).forEach(f => { if (f && f.key && !S.fav.some(x => x.key === f.key)) { S.fav.push(f); nf++; } });
     Object.entries(o.hist && typeof o.hist === 'object' ? o.hist : {}).forEach(([k, h]) => { if (h && h.item && (!S.hist[k] || (h.ts || 0) > (S.hist[k].ts || 0))) { S.hist[k] = h; nh++; } });
@@ -1075,7 +1076,7 @@ const tmohentai = {
     try {
       const file = new File([text], name, { type: 'application/json' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: 'Respaldo de Manga Reader' });
+        await navigator.share({ files: [file], title: 'Respaldo de Lector OBS' });
         toast('Respaldo listo');
         return;
       }
