@@ -1,6 +1,6 @@
 {
   "appId": "com.nekoobs.mangareader",
-  "appName": "Manga Reader",
+  "appName": "Lector OBS",
   "webDir": "www",
   "server": {
     "androidScheme": "https",
