@@ -201,3 +201,33 @@ body.hasbg .top{background:var(--topbg);backdrop-filter:blur(8px);-webkit-backdr
 @keyframes shk{25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
 .logoprev{display:flex;align-items:center;gap:12px}
 .logoprev .logo{width:110px;height:110px}
+
+/* ===== Asistente de adaptación ===== */
+.at-prog{height:3px;background:var(--ln)}
+.at-prog i{display:block;height:100%;background:var(--ac);width:20%;transition:width .25s}
+#at-title{flex:1;font-weight:700}
+#adapt .obody label{display:block;margin:12px 0;font-size:13px;color:var(--mt)}
+#adapt .obody label small{display:block;font-size:12px;margin:2px 0 4px;opacity:.85}
+#adapt .obody label input,#adapt .obody textarea{margin-top:4px}
+#adapt .obody label.tog{display:flex;gap:8px;align-items:center;color:var(--tx)}
+#adapt .obody label.tog input{width:auto;margin:0}
+#adapt details{margin-top:14px;border:1px solid var(--ln);border-radius:var(--r);padding:8px 12px;background:var(--sf)}
+#adapt summary{cursor:pointer;color:var(--ac2);margin:4px 0}
+#adapt textarea{width:100%;font:inherit;color:var(--tx);background:var(--sf2);border:1px solid var(--ln);border-radius:10px;padding:10px}
+.at-ol{margin:8px 0 8px 18px;padding:0;color:var(--mt);font-size:13px}
+#at-res{margin-top:16px}
+.at-ok{color:#4cd08b;margin:6px 0}
+.at-bad{color:#ff6b6b;margin:6px 0}
+.at-note{color:var(--mt);font-size:13px;margin:6px 0}
+.at-sug,.at-chs{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;align-items:center}
+.at-sug b{flex-basis:100%;font-size:12px;color:var(--mt)}
+.at-sug .chip,.at-chs .chip{cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.at-th{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}
+.at-card{text-align:left;min-width:0}
+.at-img{display:block;aspect-ratio:2/3;border-radius:8px;overflow:hidden;background:var(--sf2);border:1px solid var(--ln)}
+.at-img img{width:100%;height:100%;object-fit:cover;display:block}
+.at-card small{display:block;font-size:11px;margin-top:3px;line-height:1.2;max-height:2.4em;overflow:hidden;color:var(--tx)}
+.at-foot{display:flex;gap:10px;justify-content:space-between;padding:10px 14px calc(10px + var(--sb));border-top:1px solid var(--ln);background:var(--bg)}
+.at-foot .btn{flex:1}
+.at-foot [hidden]{display:none}
+code{word-break:break-all;font-size:12px}
