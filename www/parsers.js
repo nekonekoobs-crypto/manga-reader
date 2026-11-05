@@ -132,8 +132,14 @@
         const s = imgSrc(i, base);
         return s && !BAD_IMG.test(s) && !/\.(svg|gif)(\?|$)/i.test(s);
       });
+      // Si casi todas las imágenes cuelgan directamente de un mismo contenedor, ese es el lector (ignora logos y menús)
+      const direct = new Map();
+      imgs.forEach(i => { if (i.parentElement) direct.set(i.parentElement, (direct.get(i.parentElement) || 0) + 1); });
+      let dBest = null, dc = 0;
+      direct.forEach((c, el) => { if (c > dc) { dBest = el; dc = c; } });
       const counts = new Map();
-      imgs.forEach(i => {
+      if (dBest && dc >= 3 && dc >= imgs.length * 0.6) imgs = imgs.filter(i => i.parentElement === dBest);
+      else imgs.forEach(i => {
         let p = i.parentElement, d = 0;
         while (p && d < 4) { counts.set(p, (counts.get(p) || 0) + 1); p = p.parentElement; d++; }
       });
