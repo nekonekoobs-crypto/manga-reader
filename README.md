@@ -1,4 +1,4 @@
-# Manga Reader
+# Lector OBS
 
 App Android (APK) para buscar y leer manga, manhwa y webcomics.
 
@@ -6,7 +6,7 @@ App Android (APK) para buscar y leer manga, manhwa y webcomics.
 - Lectura en cascada (scroll vertical continuo, ideal para manhwa y webtoons)
 - Continuar donde lo dejaste, capítulos leídos, favoritos
 - **ManhwaWeb** (fuente por defecto) y **MangaDex** incluidas
-- Fuentes preconfiguradas: **ZonaTMO**, **M440**, **LeerManhwas** y **TMOHentai (+18)**
+- Fuentes preconfiguradas: **LectorXD**, **ZonaTMO**, **M440**, **LeerManhwas** y **TMOHentai (+18)**
 - **Cualquier otra web**: pega el enlace de una serie o capítulo y la app detecta portada, descripción, capítulos y páginas. También puedes añadir una fuente con buscador propio.
 
 ## Obtener el APK
@@ -40,6 +40,7 @@ También puedes abrir el proyecto con `npx cap open android` y compilarlo desde 
 
 **Fuentes preconfiguradas.** Se hicieron sin poder abrir los sitios reales desde el entorno de desarrollo, así que están probadas con respuestas simuladas, no con los sitios:
 
+- *LectorXD*: la portada, la serie (lista completa de capítulos, que el sitio guarda dentro del componente `ChapterList`) y el lector (`img.page-image`, imágenes en `s1.cdnlxd.xyz`) se hicieron con HTML real. El catálogo lee `/catalogo?sort=updated&page=N` (con la portada como respaldo) y la búsqueda prueba varias rutas posibles; esas dos partes no se comprobaron con el sitio real.
 - *ZonaTMO*: la serie, la lista de capítulos y el lector se hicieron con HTML real del sitio (capítulos en `/view_uploads/{id}`, imágenes en `storage.zonatmo.org`). La búsqueda lee `/biblioteca?title=` y, si no puede, usa las sugerencias del buscador; esa parte no se comprobó con el sitio real.
 - *M440*: búsqueda (`/search?q=`), serie, lista de capítulos y lector se hicieron con datos reales del sitio. La lista completa de capítulos viene cifrada (AES) dentro de la página y la app la descifra con la clave que usa el propio script del sitio; si el sitio cambia ese cifrado, la app muestra solo los capítulos con enlace visible. Puede pedir verificación de Cloudflare.
 - *LeerManhwas*: sin texto muestra la portada del sitio; la búsqueda por texto es una suposición. Pegar enlaces funciona seguro.
@@ -80,3 +81,13 @@ www/            la app (HTML, CSS, JS)
 capacitor.config.json   empaquetado Android (HTTP nativo para saltar CORS)
 .github/workflows/build-apk.yml   compila el APK en GitHub
 ```
+
+
+## Asistente para adaptar páginas (Fuentes → 🧩)
+Cinco pasos con pruebas en vivo; la app deduce selectores y plantillas a partir de direcciones reales del sitio:
+1. **Sitio**: dirección del listado de series (y, opcional, la página 2 para deducir "Cargar más"). Se ignoran menús y anuncios quedándose con el patrón de enlaces más repetido.
+2. **Búsqueda**: se busca una palabra en el sitio, se pega la dirección resultante y se convierte en plantilla con `{q}` y `{page}`. Sin búsqueda por dirección, se filtra el listado por nombre.
+3. **Serie**: prueba título, portada, sinopsis y capítulos (orden, fechas limpias). Si falla, sugiere selectores CSS tocando.
+4. **Capítulo**: prueba las imágenes (miniaturas) y el interruptor de Referer.
+5. **Guardar**: resumen de pruebas, nombre, +18, y copiar/importar la configuración como texto.
+Las fuentes creadas así se editan con el mismo asistente y sus enlaces pegados se reconocen por el dominio.
