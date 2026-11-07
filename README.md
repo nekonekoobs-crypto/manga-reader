@@ -72,16 +72,33 @@ También puedes abrir el proyecto con `npx cap open android` y compilarlo desde 
 - Algunos sitios bloquean imágenes cuando se piden desde fuera de su página (hotlink).
 - La app solo lee lo que cada sitio publica. Usa fuentes con contenido que tengas permiso de leer.
 
-## Estructura
+## Estructura (MVC con módulos ES)
 
 ```
-www/            la app (HTML, CSS, JS)
-  parsers.js    detección automática de portadas, capítulos y páginas
-  app.js        buscador, detalle, lector, biblioteca, fuentes
-capacitor.config.json   empaquetado Android (HTTP nativo para saltar CORS)
+www/
+  index.html, style.css, logo.png, fonts/
+  src/
+    main.js                 arranque: enlaza controladores y expone window.__MR para las pruebas
+    config/                 constantes (idiomas, estados, «todas las fuentes»)
+    lib/                    utilidades sin estado: dom, storage, http, texto, md5, async, parsers
+    models/                 MODELO: datos y reglas, sin tocar el DOM
+      state.js, session.js  estado persistente (S) y de la sesión (búsqueda, serie, lector)
+      library.model.js      favoritos, historial, capítulos leídos
+      settings.model.js     ajustes
+      backup.model.js       exportar / unir respaldos
+      series.model.js       carga de la ficha de una serie
+      genres/               catálogo de géneros y caché de etiquetas
+      sources/              una fuente por archivo (mangadex, manhwaweb, m440, zonatmo, lectorxd…),
+                            la fábrica generic.js, custom.js (fuentes propias) e index.js (registro)
+    services/               red y recursos: image-loader (imágenes nativas), diagnostics
+    views/                  VISTA: solo pintan HTML y leen campos del DOM
+    controllers/            CONTROLADOR: eventos, navegación y coordinación modelo ↔ vista
+    features/               módulos grandes e independientes: theme/ (menú de personalización), adapt/ (asistente)
+capacitor.config.json       empaquetado Android (HTTP nativo para saltar CORS)
 .github/workflows/build-apk.yml   compila el APK en GitHub
 ```
 
+Para añadir una fuente nueva: crea `www/src/models/sources/<nombre>.js` y regístrala en `models/sources/index.js`.
 
 ## Asistente para adaptar páginas (Fuentes → 🧩)
 Cinco pasos con pruebas en vivo; la app deduce selectores y plantillas a partir de direcciones reales del sitio:
@@ -91,3 +108,6 @@ Cinco pasos con pruebas en vivo; la app deduce selectores y plantillas a partir 
 4. **Capítulo**: prueba las imágenes (miniaturas) y el interruptor de Referer.
 5. **Guardar**: resumen de pruebas, nombre, +18, y copiar/importar la configuración como texto.
 Las fuentes creadas así se editan con el mismo asistente y sus enlaces pegados se reconocen por el dominio.
+
+## Filtro por géneros (Explorar → 🏷 Géneros)
+Marca uno o varios géneros (o escribe una etiqueta propia): se muestran las series con **todos** ellos. En MangaDex filtra su API directamente (`includedTags`); en las demás fuentes, y en "Todas las fuentes", la app lee la ficha de cada serie para comparar sus géneros (con alias español/inglés, sin acentos) y guarda lo averiguado en caché (`mr:tagc`). Las fuentes creadas con el asistente detectan géneros por enlaces de tipo género/tag/categoría.
