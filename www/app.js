@@ -426,8 +426,7 @@
       return g(q, page);
     };
   }
-
-  // TMOHentai: el listado viene como HTML (a veces dentro de {"html": ...}); cada obra se identifica por su número.
+ // TMOHentai: el listado viene como HTML (a veces dentro de {"html": ...}); cada obra se identifica por su número.
   // Oculta y no abre obras cuyo título o etiquetas apunten a menores de edad.
  const TH = 'https://tmohentai.app';
 const MINOR_RE = null; // filtro loli/shota DESACTIVADO (pon el regex aquí para reactivar)
@@ -492,6 +491,8 @@ const tmohentai = {
       return urls;
     }
   };
+
+  
 
   // ZonaTMO: series en /library/{tipo}/{id}/{slug}, capítulos en /view_uploads/{id} (imágenes en storage.zonatmo.org)
   const ZT = 'https://zonatmo.org';
